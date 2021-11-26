@@ -72,7 +72,20 @@
 
 namespace moodycamel {
 
-template<typename T, size_t MAX_BLOCK_SIZE = 512>
+struct MallocFree
+{
+	static void* malloc(size_t size)
+	{
+		return std::malloc(size);
+	}
+
+	static void free(void* block)
+	{
+		std::free(block);
+	}
+};
+
+template<typename T, size_t MAX_BLOCK_SIZE = 512, typename MallocFree = MallocFree>
 class MOODYCAMEL_MAYBE_ALIGN_TO_CACHELINE ReaderWriterQueue
 {
 	// Design: Based on a queue-of-queues. The low-level queues are just
@@ -102,9 +115,10 @@ public:
 	// allocations. If more than MAX_BLOCK_SIZE elements are requested,
 	// then several blocks of MAX_BLOCK_SIZE each are reserved (including
 	// at least one extra buffer block).
-	AE_NO_TSAN explicit ReaderWriterQueue(size_t size = 15)
+	AE_NO_TSAN explicit ReaderWriterQueue(size_t size = 15, MallocFree&& malloc_free = MallocFree{})
+		: malloc_free(std::forward<MallocFree>(malloc_free))
 #ifndef NDEBUG
-		: enqueuing(false)
+		,enqueuing(false)
 		,dequeuing(false)
 #endif
 	{
@@ -165,7 +179,8 @@ public:
 	AE_NO_TSAN ReaderWriterQueue(ReaderWriterQueue&& other)
 		: frontBlock(other.frontBlock.load()),
 		tailBlock(other.tailBlock.load()),
-		largestBlockSize(other.largestBlockSize)
+		largestBlockSize(other.largestBlockSize),
+		malloc_free(std::move(other.malloc_free))
 #ifndef NDEBUG
 		,enqueuing(false)
 		,dequeuing(false)
@@ -222,7 +237,7 @@ public:
 			
 			auto rawBlock = block->rawThis;
 			block->~Block();
-			std::free(rawBlock);
+			malloc_free.free(rawBlock);
 			block = nextBlock;
 		} while (block != frontBlock_);
 	}
@@ -725,12 +740,12 @@ private:
 	};
 	
 	
-	static Block* make_block(size_t capacity) AE_NO_TSAN
+	Block* make_block(size_t capacity) AE_NO_TSAN
 	{
 		// Allocate enough memory for the block itself, as well as all the elements it will contain
 		auto size = sizeof(Block) + std::alignment_of<Block>::value - 1;
 		size += sizeof(T) * capacity + std::alignment_of<T>::value - 1;
-		auto newBlockRaw = static_cast<char*>(std::malloc(size));
+		auto newBlockRaw = static_cast<char*>(malloc_free.malloc(size));
 		if (newBlockRaw == nullptr) {
 			return nullptr;
 		}
@@ -747,7 +762,7 @@ private:
 	weak_atomic<Block*> tailBlock;		// (Atomic) Elements are enqueued to this block
 
 	size_t largestBlockSize;
-
+	MallocFree malloc_free;
 #ifndef NDEBUG
 	weak_atomic<bool> enqueuing;
 	mutable weak_atomic<bool> dequeuing;
