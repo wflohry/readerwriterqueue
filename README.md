@@ -1,3 +1,11 @@
+## Comparison with Upstream
+
+This branch supports adding a (stateful) allocation parameter to the reader/writer queue:
+
+```c++
+auto my_queue = ReaderWriterQueue<int>(15, MyMallocFree{});
+```
+
 
 # A single-producer, single-consumer lock-free queue for C++
 
