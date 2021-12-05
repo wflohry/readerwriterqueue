@@ -547,7 +547,7 @@ private:
 
 #if MOODYCAMEL_HAS_EMPLACE
 	template<AllocationMode canAlloc, typename... Args>
-	bool inner_enqueue(Args&&... args) AE_NO_TSAN
+    AE_FORCEINLINE bool inner_enqueue(Args&&... args) AE_NO_TSAN
 #else
 	template<AllocationMode canAlloc, typename U>
 	bool inner_enqueue(U&& element) AE_NO_TSAN
@@ -569,7 +569,7 @@ private:
 		size_t blockTail = tailBlock_->tail.load();
 
 		size_t nextBlockTail = (blockTail + 1) & tailBlock_->sizeMask;
-		if (nextBlockTail != blockFront || nextBlockTail != (tailBlock_->localFront = tailBlock_->front.load())) {
+        if (nextBlockTail != blockFront || nextBlockTail != (tailBlock_->localFront = tailBlock_->front.load())) [[likely]] {
 			fence(memory_order_acquire);
 			// This block has room for at least one more element
 			char* location = tailBlock_->data + blockTail * sizeof(T);
@@ -582,7 +582,7 @@ private:
 			fence(memory_order_release);
 			tailBlock_->tail = nextBlockTail;
 		}
-		else {
+        else [[unlikely]]{
 			fence(memory_order_acquire);
 			if (tailBlock_->next.load() != frontBlock) {
 				// Note that the reason we can't advance to the frontBlock and start adding new entries there
